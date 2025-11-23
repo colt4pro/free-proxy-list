@@ -1,0 +1,73 @@
+name: Update FreeProxyDB cache
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # run every 30 minutes
+  workflow_dispatch:          # allow manual run
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Fetch proxies from FreeProxyDB and write JSON
+        run: |
+          import requests, json
+
+          all_proxies = []
+          base_url = "https://freeproxydb.com/api/proxy/search"
+          page_size = 100
+          max_pages = 5
+
+          for page in range(1, max_pages + 1):
+              params = {
+                  "protocol": "http,socks4,socks5",
+                  "anonymity": "elite,anonymous,transparent",
+                  "page_index": page,
+                  "page_size": page_size,
+              }
+              r = requests.get(base_url, params=params, timeout=20)
+              if r.status_code != 200:
+                  print("HTTP error", r.status_code)
+                  break
+              data = r.json()
+              if "data" not in data or not data["data"]:
+                  break
+              for item in data["data"]:
+                  all_proxies.append({
+                      "ip": item.get("ip", ""),
+                      "port": item.get("port", 0),
+                      "country": item.get("country", ""),
+                      "protocol": item.get("protocol", ""),
+                      "anonymity": item.get("anonymity", ""),
+                  })
+              if len(data["data"]) < page_size:
+                  break
+
+          with open("freeproxydb.json", "w", encoding="utf-8") as f:
+              json.dump(all_proxies, f)
+
+          print("Saved", len(all_proxies), "proxies")
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git status --porcelain | grep freeproxydb.json; then
+            git add freeproxydb.json
+            git commit -m "Update proxy cache"
+            git push
+          else
+            echo "No changes to commit"
+          fi
